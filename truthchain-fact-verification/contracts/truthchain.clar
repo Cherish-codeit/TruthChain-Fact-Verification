@@ -35,3 +35,20 @@
     { verifier: principal }
     { total-verifications: uint, accuracy-score: uint }
 )
+
+;; Read-only functions
+(define-read-only (get-claim (claim-id uint))
+    (map-get? claims { claim-id: claim-id })
+)
+
+(define-read-only (get-verification (claim-id uint) (verifier principal))
+    (map-get? verifications { claim-id: claim-id, verifier: verifier })
+)
+
+(define-read-only (get-verifier-stats (verifier principal))
+    (map-get? verifier-stats { verifier: verifier })
+)
+
+(define-read-only (get-claim-nonce)
+    (ok (var-get claim-nonce))
+)
