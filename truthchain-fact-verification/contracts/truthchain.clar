@@ -118,3 +118,139 @@
         (ok true)
     )
 )
+
+(define-public (distribute-rewards (claim-id uint))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found))
+            (total-pool (get reward-pool claim))
+            (reward-per-verifier (/ total-pool (get verification-count claim)))
+        )
+        (asserts! (is-eq (get status claim) "finalized") err-claim-finalized)
+        (asserts! (> (get verification-count claim) u0) err-invalid-score)
+        (ok reward-per-verifier)
+    )
+)
+
+(define-public (claim-reward (claim-id uint))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found))
+            (verification (unwrap! (map-get? verifications { claim-id: claim-id, verifier: tx-sender }) err-not-found))
+            (total-pool (get reward-pool claim))
+            (reward-amount (/ total-pool (get verification-count claim)))
+        )
+        (asserts! (is-eq (get status claim) "finalized") err-claim-finalized)
+        (try! (as-contract (stx-transfer? reward-amount tx-sender (unwrap-panic (some tx-sender)))))
+        (ok reward-amount)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (update-verifier-accuracy (verifier principal) (accuracy uint))
+    (let
+        (
+            (stats (default-to 
+                { total-verifications: u0, accuracy-score: u0 }
+                (map-get? verifier-stats { verifier: verifier })
+            ))
+        )
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (<= accuracy u100) err-invalid-score)
+        (map-set verifier-stats
+            { verifier: verifier }
+            (merge stats { accuracy-score: accuracy })
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (challenge-claim (claim-id uint) (reason (string-ascii 200)))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found))
+        )
+        (asserts! (is-eq (get status claim) "finalized") err-claim-finalized)
+        (map-set claims
+            { claim-id: claim-id }
+            (merge claim { status: "disputed" })
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (resolve-dispute (claim-id uint) (final-status (string-ascii 20)))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found))
+        )
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (is-eq (get status claim) "disputed") err-claim-finalized)
+        (map-set claims
+            { claim-id: claim-id }
+            (merge claim { status: final-status })
+        )
+        (ok true)
+    )
+)
+
+(define-public (update-verification-threshold (new-threshold uint))
+    (begin
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (asserts! (> new-threshold u0) err-invalid-score)
+        (var-set verification-threshold new-threshold)
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (withdraw-claim (claim-id uint))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found))
+            (reward-pool (get reward-pool claim))
+        )
+        (asserts! (is-eq tx-sender (get submitter claim)) err-owner-only)
+        (asserts! (is-eq (get status claim) "pending") err-claim-finalized)
+        (asserts! (is-eq (get verification-count claim) u0) err-already-verified)
+        (try! (as-contract (stx-transfer? reward-pool tx-sender (get submitter claim))))
+        (map-set claims
+            { claim-id: claim-id }
+            (merge claim { status: "withdrawn" })
+        )
+        (ok reward-pool)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (update-claim-status (claim-id uint) (new-status (string-ascii 20)))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found))
+        )
+        (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+        (map-set claims
+            { claim-id: claim-id }
+            (merge claim { status: new-status })
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (boost-reward-pool (claim-id uint) (additional-amount uint))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found))
+        )
+        (asserts! (is-eq (get status claim) "pending") err-claim-finalized)
+        (try! (stx-transfer? additional-amount tx-sender (as-contract tx-sender)))
+        (map-set claims
+            { claim-id: claim-id }
+            (merge claim { reward-pool: (+ (get reward-pool claim) additional-amount) })
+        )
+        (ok true)
+    )
+)
