@@ -254,3 +254,131 @@
         (ok true)
     )
 )
+
+;; Read-only helper functions
+(define-read-only (get-verification-threshold)
+    (ok (var-get verification-threshold))
+)
+
+(define-read-only (get-claim-status (claim-id uint))
+    (ok (get status (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found)))
+)
+
+(define-read-only (get-claim-truth-score (claim-id uint))
+    (ok (get truth-score (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found)))
+)
+
+(define-read-only (get-claim-reward-pool (claim-id uint))
+    (ok (get reward-pool (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found)))
+)
+
+(define-read-only (is-claim-finalized (claim-id uint))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found))
+        )
+        (ok (is-eq (get status claim) "finalized"))
+    )
+)
+
+(define-read-only (get-verifier-total-verifications (verifier principal))
+    (let
+        (
+            (stats (default-to 
+                { total-verifications: u0, accuracy-score: u0 }
+                (map-get? verifier-stats { verifier: verifier })
+            ))
+        )
+        (ok (get total-verifications stats))
+    )
+)
+
+(define-read-only (get-verifier-accuracy (verifier principal))
+    (let
+        (
+            (stats (default-to 
+                { total-verifications: u0, accuracy-score: u0 }
+                (map-get? verifier-stats { verifier: verifier })
+            ))
+        )
+        (ok (get accuracy-score stats))
+    )
+)
+
+(define-read-only (calculate-verifier-reputation (verifier principal))
+    (let
+        (
+            (stats (default-to 
+                { total-verifications: u0, accuracy-score: u0 }
+                (map-get? verifier-stats { verifier: verifier })
+            ))
+            (total-verifs (get total-verifications stats))
+            (accuracy (get accuracy-score stats))
+        )
+        (if (> total-verifs u0)
+            (ok (/ (* accuracy total-verifs) u10))
+            (ok u0)
+        )
+    )
+)
+
+(define-read-only (is-verified-by (claim-id uint) (verifier principal))
+    (ok (is-some (map-get? verifications { claim-id: claim-id, verifier: verifier })))
+)
+
+(define-read-only (get-verification-score (claim-id uint) (verifier principal))
+    (ok (get score (unwrap! (map-get? verifications { claim-id: claim-id, verifier: verifier }) err-not-found)))
+)
+
+(define-read-only (get-contract-owner)
+    (ok contract-owner)
+)
+
+;; Private helper functions
+(define-private (increment-verifier-count (verifier principal))
+    (let
+        (
+            (stats (default-to 
+                { total-verifications: u0, accuracy-score: u0 }
+                (map-get? verifier-stats { verifier: verifier })
+            ))
+        )
+        (map-set verifier-stats
+            { verifier: verifier }
+            (merge stats { total-verifications: (+ (get total-verifications stats) u1) })
+        )
+        true
+    )
+)
+
+(define-private (calculate-weighted-score (old-score uint) (old-count uint) (new-score uint))
+    (if (is-eq old-count u0)
+        new-score
+        (/ (+ (* old-score old-count) new-score) (+ old-count u1))
+    )
+)
+
+(define-private (is-valid-score (score uint))
+    (and (>= score u0) (<= score u100))
+)
+
+(define-private (meets-threshold (claim-id uint))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) false))
+        )
+        (>= (get verification-count claim) (var-get verification-threshold))
+    )
+)
+
+(define-private (can-finalize (claim-id uint))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) false))
+        )
+        (and
+            (is-eq (get status claim) "pending")
+            (>= (get verification-count claim) (var-get verification-threshold))
+        )
+    )
+)
