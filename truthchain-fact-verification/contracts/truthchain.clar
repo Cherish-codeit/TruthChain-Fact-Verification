@@ -52,3 +52,69 @@
 (define-read-only (get-claim-nonce)
     (ok (var-get claim-nonce))
 )
+
+;; Public functions
+;; #[allow(unchecked_data)]
+(define-public (submit-claim (claim-text (string-ascii 500)) (reward-pool uint))
+    (let
+        (
+            (new-claim-id (+ (var-get claim-nonce) u1))
+        )
+        (try! (stx-transfer? reward-pool tx-sender (as-contract tx-sender)))
+        (map-set claims
+            { claim-id: new-claim-id }
+            {
+                submitter: tx-sender,
+                claim-text: claim-text,
+                truth-score: u0,
+                verification-count: u0,
+                status: "pending",
+                reward-pool: reward-pool
+            }
+        )
+        (var-set claim-nonce new-claim-id)
+        (ok new-claim-id)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (verify-claim (claim-id uint) (score uint))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found))
+            (current-count (get verification-count claim))
+            (current-score (get truth-score claim))
+        )
+        (asserts! (is-none (map-get? verifications { claim-id: claim-id, verifier: tx-sender })) err-already-verified)
+        (asserts! (is-eq (get status claim) "pending") err-claim-finalized)
+        (asserts! (<= score u100) err-invalid-score)
+        (map-set verifications
+            { claim-id: claim-id, verifier: tx-sender }
+            { score: score, timestamp: stacks-block-height }
+        )
+        (map-set claims
+            { claim-id: claim-id }
+            (merge claim {
+                truth-score: (/ (+ (* current-score current-count) score) (+ current-count u1)),
+                verification-count: (+ current-count u1)
+            })
+        )
+        (ok true)
+    )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (finalize-claim (claim-id uint))
+    (let
+        (
+            (claim (unwrap! (map-get? claims { claim-id: claim-id }) err-not-found))
+        )
+        (asserts! (>= (get verification-count claim) (var-get verification-threshold)) err-invalid-score)
+        (asserts! (is-eq (get status claim) "pending") err-claim-finalized)
+        (map-set claims
+            { claim-id: claim-id }
+            (merge claim { status: "finalized" })
+        )
+        (ok true)
+    )
+)
